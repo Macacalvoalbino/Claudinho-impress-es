@@ -1,0 +1,72 @@
+﻿TRAVACALOR - limita o calor da impressora de etiquetas (ELGIN L42 PRO FULL)
+==========================================================================
+
+O QUE FAZ
+O programa de realocação continua "pedindo" calor máximo, mas o pedido passa
+por um filtro antes de chegar na impressora. O filtro reduz o comando de calor
+(darkness) até o limite que você escolheu e envia o resto da etiqueta sem
+alteração. Assim o ribbon não é mais cortado.
+Funciona com as três linguagens da L42 Pro: PPLA, PPLB e PPLZ.
+
+COMO USAR
+1. Extraia a pasta TravaCalor inteira (não abra direto de dentro do .zip).
+2. Clique duas vezes em "ABRIR TRAVACALOR.bat" e aceite o pedido de
+   administrador. Abre uma janela com 3 passos:
+
+   1. QUAL É A IMPRESSORA
+      A lista mostra as impressoras do Windows e quais estão conectadas agora.
+      A que está conectada já vem escolhida. Ligou a impressora depois?
+      Clique em "Atualizar lista".
+
+   2. NOMES DAS IMPRESSORAS
+      - COM trava: é o nome que o programa de realocação usa para imprimir.
+        Já vem com o nome atual da impressora, então não precisa mudar nada
+        no programa. Pode trocar por outro nome se quiser.
+      - Direta, SEM trava: é a impressora de verdade, para quando quiser
+        imprimir sem limite. Vem como "<nome> - DIRETA".
+
+   3. CALOR MÁXIMO
+      Arraste as barras. Quanto menor o número, menos calor.
+
+3. Clique em "Instalar trava". Pronto.
+   Fica um atalho "TravaCalor" na Área de Trabalho para abrir o painel depois.
+
+MUDAR DEPOIS
+Abra o painel, mexa no que quiser (calor, nomes, impressora) e clique em
+"Salvar alterações". Vale já na próxima etiqueta, sem reiniciar nada.
+- Trocar o nome: é só digitar o nome novo no passo 2.
+- Trocar de impressora: escolha a outra impressora no passo 1. A trava passa
+  para ela e o programa de realocação continua usando o mesmo nome.
+
+COMO SABER SE FUNCIONOU
+Imprima uma etiqueta e olhe o topo do painel:
+  Faixa verde "TRAVA ATIVA"            -> a trava está ligada.
+  "calor REDUZIDO -> ~SD 30->15"       -> funcionou, o calor foi reduzido.
+  "calor já estava dentro do limite"   -> o programa não passou do limite.
+  "não mandou comando de calor"        -> veja "Se não funcionar" abaixo.
+  Faixa vermelha "PARADA"              -> clique em "Reiniciar trava".
+O botão "Abrir histórico" mostra todas as impressões.
+
+QUAL BARRA EU MEXO?
+Depende da linguagem que o driver usa. Imprima uma etiqueta: a linha
+"Última impressão" mostra o comando encontrado:
+  ~SD ou ^MD  -> barra PPLZ (padrão 15, de 0 a 30)
+  H           -> barra PPLA (padrão 12, de 0 a 30)
+  D           -> barra PPLB (padrão 8, de 0 a 15)
+Dica: baixe aos poucos até achar o menor valor que ainda deixa o código de
+barras legível no leitor. Esse é o ponto ideal.
+
+SE NÃO FUNCIONAR
+Marque "Guardar cópia de cada etiqueta para diagnóstico", clique em "Salvar
+alterações" e imprima uma etiqueta. Os arquivos brutos ficam em
+C:\ProgramData\TravaCalor\jobs. Abra o "-original.prn" no Bloco de Notas:
+dá para ver qual comando de calor o programa está mandando.
+
+DESINSTALAR
+Abra o painel e clique em "Desinstalar". A impressora com trava é removida e a
+impressora de verdade fica com o nome que o programa de realocação usa, então
+ele continua imprimindo (sem limite de calor).
+
+JÁ TINHA A VERSÃO ANTIGA INSTALADA?
+Não precisa desinstalar. Abra o painel novo e clique em "Salvar alterações":
+ele reconhece a instalação, mantém os limites e atualiza o filtro.
