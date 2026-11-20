@@ -126,9 +126,33 @@ function Reiniciar-Filtro {
     else { Registrar-Tarefa }
 }
 
+# Verifica se o filtro esta escutando a porta local. Usa so .NET (rapido, sem WMI/CIM),
+# para poder ser chamado pelo relogio da tela sem congelar a janela.
 function Filtro-Rodando {
-    $t = Get-ScheduledTask -TaskName $tarefa -ErrorAction SilentlyContinue
-    return ($t -and "$($t.State)" -eq 'Running')
+    $c = $script:cfg
+    if (-not $c) { return $false }
+    try {
+        $porta = [int]$c.porta
+        foreach ($e in [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()) {
+            if ($e.Port -eq $porta) { return $true }
+        }
+    } catch { }
+    return $false
+}
+
+# Le a ultima linha do historico sem bloquear o filtro, que escreve nele ao mesmo tempo
+function Ultima-Linha-Log {
+    if (-not (Test-Path $logFile)) { return '' }
+    $fs = New-Object IO.FileStream($logFile, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]'ReadWrite, Delete')
+    try {
+        $tam = [Math]::Min($fs.Length, 4096)
+        [void]$fs.Seek(-$tam, [IO.SeekOrigin]::End)
+        $buf = New-Object byte[] $tam
+        [void]$fs.Read($buf, 0, $tam)
+        $linhas = [Text.Encoding]::UTF8.GetString($buf) -split "`r?`n" | Where-Object { $_.Trim() }
+        if ($linhas) { return [string]@($linhas)[-1] }
+        return ''
+    } finally { $fs.Dispose() }
 }
 
 # Copia os arquivos para C:\ProgramData\TravaCalor. Devolve $true se o filtro mudou.
@@ -276,7 +300,7 @@ function Remover([switch]$ManterPasta) {
     if ($c) {
         $travaPadrao = Eh-Padrao ([string]$c.impressoraTrava)
         Remove-Printer -Name $c.impressoraTrava -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 4
         Remove-PrinterPort -Name "$prefixoPorta$($c.porta)" -ErrorAction SilentlyContinue
         $nomeFinal = [string]$c.impressoraReal
         if ($c.assumiuNome -and (Existe-Impressora $c.impressoraReal) -and -not (Existe-Impressora $c.impressoraTrava)) {
@@ -484,7 +508,7 @@ function Atualizar-Situacao {
 
     # Última linha do histórico, em linguagem simples
     $linha = ''
-    try { if (Test-Path $logFile) { $linha = [string](Get-Content $logFile -Tail 1) } } catch { }
+    try { $linha = Ultima-Linha-Log } catch { }
     if ($linha -eq $script:ultimoLog -and $lblUltima.Tag -eq 'log') { return }
     $script:ultimoLog = $linha
     $lblUltima.Tag = 'log'
@@ -604,14 +628,19 @@ function Aplicar {
 }
 
 # Roda uma ação mostrando o erro numa caixa, em vez de sumir sem avisar
+# (o relógio da tela fica pausado durante a ação, para não rodar por cima dela)
 function Tentar([scriptblock]$acao) {
+    $script:ocupado = $true
     $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
     try { & $acao }
     catch {
         Erro "Não deu certo:`n`n$($_.Exception.Message)"
         try { Carregar-Tela } catch { }
     }
-    finally { $form.Cursor = [System.Windows.Forms.Cursors]::Default }
+    finally {
+        if (-not $script:fechando) { $form.Cursor = [System.Windows.Forms.Cursors]::Default }
+        $script:ocupado = $false
+    }
 }
 
 $cmb.Add_SelectedIndexChanged({ if (-not $script:carregando) { Tentar { Sugerir-Nomes } } })
@@ -630,7 +659,7 @@ $btnLog.Add_Click({
 $btnReiniciar.Add_Click({
     Tentar {
         Reiniciar-Filtro
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 4
         $lblUltima.Tag = ''
         Atualizar-Situacao
     }
@@ -653,12 +682,27 @@ $btnRemover.Add_Click({
     }
 })
 
+# Relógio que atualiza a situação a cada 3 s. Nunca roda duas vezes ao mesmo tempo,
+# nem durante uma ação, nem depois que a janela começou a fechar.
+$script:ocupado  = $false
+$script:fechando = $false
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 3000
-$timer.Add_Tick({ try { Atualizar-Situacao } catch { } })
+$timer.Add_Tick({
+    if ($script:ocupado -or $script:fechando) { return }
+    $script:ocupado = $true
+    try { Atualizar-Situacao } catch { }
+    finally { $script:ocupado = $false }
+})
 
-$form.Add_Shown({ Tentar { Carregar-Tela }; $timer.Start() })
-$form.Add_FormClosed({ $timer.Stop() })
+$form.Add_Shown({ Tentar { Carregar-Tela }; if (-not $script:fechando) { $timer.Start() } })
+$form.Add_FormClosing({ $script:fechando = $true; $timer.Stop() })
 
 try { [void]$form.ShowDialog() }
 catch { Erro "O painel encontrou um problema e vai fechar:`n`n$($_.Exception.Message)" }
+finally {
+    $script:fechando = $true
+    try { $timer.Stop(); $timer.Dispose(); $form.Dispose() } catch { }
+}
+# Garante que o processo do painel termine (ele roda escondido, sem janela de console)
+[Environment]::Exit(0)
