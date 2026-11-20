@@ -35,8 +35,8 @@ function CarregarConfig {
         $script:cfg = $novo
         $script:cfgData = $data
         if (-not $primeira) {
-            Log ("Configuracao recarregada -> '{0}' | ~SD max {1}, ^MD max {2}, H max {3}, D max {4}" -f `
-                $novo.impressoraReal, $novo.zplMaxSD, $novo.zplMaxMD, $novo.pplaMaxH, $novo.pplbMaxD)
+            Log ("Configuracao recarregada -> '{0}' | ~SD max {1}, ^MD max {2}, H max {3}, D max {4}, velocidade max {5}" -f `
+                $novo.impressoraReal, $novo.zplMaxSD, $novo.zplMaxMD, $novo.pplaMaxH, $novo.pplbMaxD, $novo.velocidadeMax)
         }
     } catch {
         if ($null -eq $script:cfg) { throw }
@@ -78,49 +78,115 @@ public static class RawPrinter {
 }
 "@
 
-# Troca o valor do grupo "v" por $max quando ele passar do limite
-function Limitar([string]$txt, [string]$padrao, [int]$max, [string]$fmt, [string]$nome, $mudancas, $achados) {
+# Inicio e fim de linha. Aceita CR, LF ou CRLF: o PPLA costuma usar so CR,
+# e com "(?m)^...$" do .NET (que so entende LF) o comando passava sem ser visto.
+$IL = '(?:^|(?<=[\r\n]))'
+$FL = '(?=[\r\n]|$)'
+
+# Troca o valor do grupo "v" pelo limite quando ele passar do limite.
+# $ler converte o texto achado em numero; $escrever converte o limite em texto.
+function Limitar([string]$txt, [string]$padrao, [double]$max, [scriptblock]$ler, [scriptblock]$escrever,
+                 [string]$nome, $mudancas, $achados) {
     $rx = [regex]$padrao
+    $novoTxt = & $escrever $max
     $avaliador = [Text.RegularExpressions.MatchEvaluator]{
         param($m)
         $g = $m.Groups['v']
-        $v = [int]$g.Value
-        $achados.Add("$nome=$v")
+        $v = & $ler $g.Value
+        $achados.Add("$nome=$($g.Value)")
         if ($v -le $max) { return $m.Value }
-        $mudancas.Add("$nome $v->$max")
+        $mudancas.Add("$nome $($g.Value)->$novoTxt")
         $ini = $g.Index - $m.Index
-        return $m.Value.Substring(0, $ini) + $max.ToString($fmt) + $m.Value.Substring($ini + $g.Length)
+        return $m.Value.Substring(0, $ini) + $novoTxt + $m.Value.Substring($ini + $g.Length)
     }
     return $rx.Replace($txt, $avaliador)
 }
+
+$lerInt = { param($t) [int]$t }
+function Fmt([string]$f) { return { param($n) ([int]$n).ToString($f) }.GetNewClosure() }
+
+# Velocidade PPLZ/ZPL (^PR): numero em pol/s ou letra A=2 B=3 C=4 D=6 E=8
+$lerVelZpl = { param($t)
+    switch -casesensitive ($t.ToUpper()) { 'A' { 2 } 'B' { 3 } 'C' { 4 } 'D' { 6 } 'E' { 8 } default { [int]$t } } }
+# Velocidade PPLA/DPL (Pa): letra A=1,0 pol/s, B=1,5, C=2,0 ... (meio pol/s por letra)
+$letrasPpla = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+$lerVelPpla = { param($t) 1 + $letrasPpla.IndexOf([string]$t) * 0.5 }
+$escVelPpla = { param($n) [string]$letrasPpla[[int][Math]::Max(0, [Math]::Floor(($n - 1) * 2))] }
 
 function Filtrar([byte[]]$bytes) {
     $txt = $latin1.GetString($bytes)
     $mud = New-Object 'System.Collections.Generic.List[string]'
     $ach = New-Object 'System.Collections.Generic.List[string]'
     $ling = @()
+    $vel = 0
+    if ($cfg.velocidadeMax) { $vel = [double]$cfg.velocidadeMax }
+    $ppla = $txt.Contains([string][char]2 + 'L')
+    $zpl = $txt -match '\^XA'
 
-    # PPLZ (compativel ZPL): ~SDnn (0-30) e ^MDn (-30 a 30, relativo)
-    if ($txt -match '\^XA') {
+    # PPLZ (compativel ZPL): ~SDnn (0-30) e ^MDn (-30 a 30, relativo ao ~SD guardado na impressora)
+    if ($zpl) {
         $ling += 'PPLZ/ZPL'
-        $txt = Limitar $txt '~SD(?<v>\d{1,2})' $cfg.zplMaxSD '00' '~SD' $mud $ach
-        $txt = Limitar $txt '\^MD(?<v>-?\d{1,2})' $cfg.zplMaxMD '0' '^MD' $mud $ach
+        $antes = $ach.Count
+        $txt = Limitar $txt '~SD(?<v>\d{1,2})' $cfg.zplMaxSD $lerInt (Fmt '00') '~SD' $mud $ach
+        $temSD = $ach.Count -gt $antes
+        $txt = Limitar $txt '\^MD(?<v>-?\d{1,2})' $cfg.zplMaxMD $lerInt (Fmt '0') '^MD' $mud $ach
+        if (-not $temSD) {
+            # Sem ~SD o ^MD soma em cima do calor guardado na impressora (que pode estar no maximo).
+            # Manda o calor absoluto antes da etiqueta.
+            $sd = ([int]$cfg.zplMaxSD).ToString('00')
+            $i = $txt.IndexOf('^XA')
+            $txt = $txt.Substring(0, $i) + "~SD$sd" + $txt.Substring($i)
+            $mud.Add("~SD inserido=$sd")
+        }
+        if ($vel -gt 0) {
+            $txt = Limitar $txt '\^PR(?<v>[A-Ea-e]|\d{1,2})' $vel $lerVelZpl (Fmt '0') 'velocidade ^PR' $mud $ach
+        }
     }
     # PPLA (compativel DPL/Datamax): linha "Hnn" dentro do formato de etiqueta (STX L)
-    if ($txt.Contains([string][char]2 + 'L')) {
+    if ($ppla) {
         $ling += 'PPLA/DPL'
-        $txt = Limitar $txt '(?m)^H(?<v>\d{2})(?=\r?$)' $cfg.pplaMaxH '00' 'H' $mud $ach
+        $antes = $ach.Count
+        $txt = Limitar $txt "$($IL)H(?<v>\d{2})$FL" $cfg.pplaMaxH $lerInt (Fmt '00') 'H' $mud $ach
+        if ($ach.Count -eq $antes) {
+            # Sem "H" a impressora usa o calor guardado nela. Coloca o limite em cada etiqueta.
+            $h = ([int]$cfg.pplaMaxH).ToString('00')
+            $rxL = [regex]'\x02L(?<t>\r\n|\r|\n)'
+            if ($rxL.IsMatch($txt)) {
+                $txt = $rxL.Replace($txt, [Text.RegularExpressions.MatchEvaluator]{
+                    param($m) $m.Value + "H$h" + $m.Groups['t'].Value })
+                $mud.Add("H inserido=$h")
+            }
+        }
+        if ($vel -gt 0) {
+            $txt = Limitar $txt "$($IL)P(?<v>[A-Za-z])$FL" $vel $lerVelPpla $escVelPpla 'velocidade P' $mud $ach
+        }
     }
-    # PPLB (compativel EPL2): linha "Dn" (0-15)
-    if ($txt -match '(?m)^N\r?$' -or $txt -match '(?m)^P\d+') {
+    # PPLB (compativel EPL2): linha "Dn" (0-15). So se nao for PPLA/PPLZ, para nao
+    # confundir a linha "D11" (tamanho do ponto) do PPLA com calor.
+    if (-not $ppla -and -not $zpl -and ($txt -match "$($IL)N$FL" -or $txt -match "$($IL)P\d+")) {
         $ling += 'PPLB/EPL'
-        $txt = Limitar $txt '(?m)^D(?<v>\d{1,2})(?=\r?$)' $cfg.pplbMaxD '0' 'D' $mud $ach
+        $antes = $ach.Count
+        $txt = Limitar $txt "$($IL)D(?<v>\d{1,2})$FL" $cfg.pplbMaxD $lerInt (Fmt '0') 'D' $mud $ach
+        if ($ach.Count -eq $antes) {
+            $d = [int]$cfg.pplbMaxD
+            $n = [regex]::Match($txt, "$($IL)N(?<t>\r\n|\n|\r)")
+            if ($n.Success) {
+                $pos = $n.Index + $n.Length
+                $txt = $txt.Substring(0, $pos) + "D$d" + $n.Groups['t'].Value + $txt.Substring($pos)
+            } else {
+                $txt = "`nD$d`n" + $txt
+            }
+            $mud.Add("D inserido=$d")
+        }
+        if ($vel -gt 0) {
+            $txt = Limitar $txt "$($IL)S(?<v>\d{1,2})$FL" $vel $lerInt (Fmt '0') 'velocidade S' $mud $ach
+        }
     }
 
     $resumo = if ($ling.Count) { $ling -join '+' } else { 'linguagem nao reconhecida' }
-    if ($ach.Count -eq 0) { $resumo += ' | nenhum comando de calor encontrado' }
-    elseif ($mud.Count -eq 0) { $resumo += ' | ja dentro do limite (' + (($ach | Select-Object -Unique) -join ',') + ')' }
-    else { $resumo += ' | LIMITADO: ' + (($mud | Select-Object -Unique) -join ', ') }
+    if ($mud.Count -gt 0) { $resumo += ' | CONTROLADO: ' + (($mud | Select-Object -Unique) -join ', ') }
+    elseif ($ach.Count -gt 0) { $resumo += ' | ja dentro do limite (' + (($ach | Select-Object -Unique) -join ',') + ')' }
+    else { $resumo += ' | nenhum comando de calor encontrado' }
 
     return @{ Bytes = $latin1.GetBytes($txt); Resumo = $resumo }
 }

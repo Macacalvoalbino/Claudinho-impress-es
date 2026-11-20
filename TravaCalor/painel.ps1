@@ -35,7 +35,7 @@ $tarefa       = 'TravaCalor'
 $prefixoPorta = 'TRAVA_CALOR_'
 $atalho       = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'TravaCalor.lnk'
 $arquivos     = 'trava-calor.ps1', 'painel.ps1', 'ABRIR TRAVACALOR.bat', 'LEIA-ME.txt'
-$padroes      = @{ zplMaxSD = 15; zplMaxMD = 0; pplaMaxH = 12; pplbMaxD = 8 }
+$padroes      = @{ zplMaxSD = 15; zplMaxMD = 0; pplaMaxH = 12; pplbMaxD = 8; velocidadeMax = 0 }
 
 $script:cfg        = $null     # configuração instalada (ou $null se não instalada)
 $script:lista      = @()       # impressoras mostradas na caixa de seleção
@@ -245,6 +245,7 @@ function Instalar($sel, [string]$nomeTrava, [string]$nomeDireta, $lim) {
         zplMaxMD        = $lim.zplMaxMD
         pplaMaxH        = $lim.pplaMaxH
         pplbMaxD        = $lim.pplbMaxD
+        velocidadeMax   = $lim.velocidadeMax
         salvarJobs      = $lim.salvarJobs
     })
     Registrar-Tarefa
@@ -284,6 +285,7 @@ function Alterar([string]$nomeTrava, [string]$nomeDireta, $lim) {
         zplMaxMD        = $lim.zplMaxMD
         pplaMaxH        = $lim.pplaMaxH
         pplbMaxD        = $lim.pplbMaxD
+        velocidadeMax   = $lim.velocidadeMax
         salvarJobs      = $lim.salvarJobs
     })
 
@@ -355,7 +357,7 @@ function Novo-Botao($pai, [string]$texto, [int]$x, [int]$y, [int]$w, [int]$h) {
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'TravaCalor - limite de calor da impressora de etiquetas'
 $form.Font = $fonte
-$form.ClientSize = New-Object System.Drawing.Size(620, 688)
+$form.ClientSize = New-Object System.Drawing.Size(620, 738)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -401,7 +403,7 @@ $l.Font = $fonte
 $l.ForeColor = $cinza
 
 # --- 3. limites
-$g3 = Novo-Grupo '3. Calor máximo permitido (quanto menor o número, menos calor)' 350 278
+$g3 = Novo-Grupo '3. Calor e velocidade máximos (quanto menor o número, menos esforço)' 350 328
 
 function Nova-Barra([string]$texto, [int]$y, [int]$max) {
     $r = Novo-Rotulo $g3 $texto 12 $y 200 36
@@ -416,40 +418,46 @@ function Nova-Barra([string]$texto, [int]$y, [int]$max) {
     $g3.Controls.Add($t)
     $v = Novo-Rotulo $g3 '' 508 ($y + 4) 78 22
     $t.Tag = $v
-    $t.Add_ValueChanged({ param($s, $e) $s.Tag.Text = "$($s.Value) de $($s.Maximum)" })
+    $t.Add_ValueChanged({ param($s, $e)
+        if ($s.Name -eq 'vel') { $s.Tag.Text = if ($s.Value -eq 0) { 'sem limite' } else { "$($s.Value) pol/s" } }
+        else { $s.Tag.Text = "$($s.Value) de $($s.Maximum)" } })
     $v.Text = "0 de $max"
     return $t
 }
 $barSD = Nova-Barra "Linguagem PPLZ (ZPL)`ncomando ~SD, de 0 a 30" 24 30
 $barH  = Nova-Barra "Linguagem PPLA`ncomando H, de 0 a 30" 70 30
 $barD  = Nova-Barra "Linguagem PPLB (EPL)`ncomando D, de 0 a 15" 116 15
+$barVel = Nova-Barra "Velocidade máxima (todas)`n0 = não limitar" 162 6
+$barVel.Name = 'vel'
+$barVel.Tag.Text = 'sem limite'
 
-$l = Novo-Rotulo $g3 'PPLZ: ajuste fino ^MD (-30 a 30)' 12 166 200 20
+$l = Novo-Rotulo $g3 'PPLZ: ajuste fino ^MD (-30 a 30)' 12 214 200 20
 $l.Font = $fonte
 $numMD = New-Object System.Windows.Forms.NumericUpDown
 $numMD.Font = $fonte
 $numMD.Minimum = -30
 $numMD.Maximum = 30
-$numMD.SetBounds(216, 163, 60, 24)
+$numMD.SetBounds(216, 211, 60, 24)
 $g3.Controls.Add($numMD)
-$btnPadrao = Novo-Botao $g3 'Voltar aos valores padrão' 412 161 170 27
+$btnPadrao = Novo-Botao $g3 'Voltar aos valores padrão' 412 209 170 27
 
 $l = Novo-Rotulo $g3 ('Não sabe qual linguagem a impressora usa? Imprima uma etiqueta e olhe a linha "Última ' +
-    'impressão" lá em cima. Baixe aos poucos até achar o menor valor em que o código de barras ainda é lido.') 12 196 570 34
+    'impressão" lá em cima. Baixe aos poucos até achar o menor valor em que o código de barras ainda é lido. ' +
+    'Se o ribbon ainda cortar ou a impressora fizer "tec tec", limite também a velocidade (comece com 3).') 12 244 570 48
 $l.Font = $fonte
 $l.ForeColor = $cinza
 $chkJobs = New-Object System.Windows.Forms.CheckBox
 $chkJobs.Text = 'Guardar cópia de cada etiqueta para diagnóstico (pasta C:\ProgramData\TravaCalor\jobs)'
 $chkJobs.Font = $fonte
-$chkJobs.SetBounds(12, 240, 570, 24)
+$chkJobs.SetBounds(12, 294, 570, 24)
 $g3.Controls.Add($chkJobs)
 
 # --- botões
-$btnAplicar = Novo-Botao $form 'Instalar trava' 12 638 236 40
+$btnAplicar = Novo-Botao $form 'Instalar trava' 12 688 236 40
 $btnAplicar.Font = New-Object System.Drawing.Font('Segoe UI', 10, [System.Drawing.FontStyle]::Bold)
-$btnLog       = Novo-Botao $form 'Abrir histórico' 256 638 112 40
-$btnReiniciar = Novo-Botao $form 'Reiniciar trava' 376 638 112 40
-$btnRemover   = Novo-Botao $form 'Desinstalar' 496 638 112 40
+$btnLog       = Novo-Botao $form 'Abrir histórico' 256 688 112 40
+$btnReiniciar = Novo-Botao $form 'Reiniciar trava' 376 688 112 40
+$btnRemover   = Novo-Botao $form 'Desinstalar' 496 688 112 40
 
 # ---------------------------------------------------------------- lógica da tela
 function Limitar-Valor($v, [int]$min, [int]$max, [int]$padrao) {
@@ -513,8 +521,8 @@ function Atualizar-Situacao {
     $script:ultimoLog = $linha
     $lblUltima.Tag = 'log'
     $hora = if ($linha.Length -ge 19) { $linha.Substring(0, 19) } else { '' }
-    if ($linha -match 'LIMITADO: (.+)$') {
-        $lblUltima.Text = "Última impressão ($hora): calor REDUZIDO  ->  $($Matches[1])"
+    if ($linha -match '(?:CONTROLADO|LIMITADO): (.+)$') {
+        $lblUltima.Text = "Última impressão ($hora): calor CONTROLADO  ->  $($Matches[1])"
         $lblUltima.ForeColor = $verde
     } elseif ($linha -match '\| (.+?) \| ja dentro do limite \((.+)\)') {
         $lblUltima.Text = "Última impressão ($hora): $($Matches[1]), calor já estava dentro do limite ($($Matches[2]))"
@@ -556,6 +564,7 @@ function Carregar-Tela {
         $barH.Value  = Limitar-Valor $fonteLim.pplaMaxH 0 30 $padroes.pplaMaxH
         $barD.Value  = Limitar-Valor $fonteLim.pplbMaxD 0 15 $padroes.pplbMaxD
         $numMD.Value = Limitar-Valor $fonteLim.zplMaxMD -30 30 $padroes.zplMaxMD
+        $barVel.Value = Limitar-Valor $fonteLim.velocidadeMax 0 6 $padroes.velocidadeMax
         $chkJobs.Checked = [bool]($c -and $c.salvarJobs)
     } finally { $script:carregando = $false }
     Sugerir-Nomes
@@ -597,6 +606,7 @@ function Aplicar {
         zplMaxMD   = [int]$numMD.Value
         pplaMaxH   = [int]$barH.Value
         pplbMaxD   = [int]$barD.Value
+        velocidadeMax = [int]$barVel.Value
         salvarJobs = [bool]$chkJobs.Checked
     }
 
@@ -649,6 +659,7 @@ $btnAplicar.Add_Click({ Tentar { Aplicar } })
 $btnPadrao.Add_Click({
     $barSD.Value = $padroes.zplMaxSD; $barH.Value = $padroes.pplaMaxH
     $barD.Value = $padroes.pplbMaxD;  $numMD.Value = $padroes.zplMaxMD
+    $barVel.Value = $padroes.velocidadeMax
 })
 $btnLog.Add_Click({
     Tentar {

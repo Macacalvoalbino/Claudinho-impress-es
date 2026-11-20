@@ -25,8 +25,10 @@ COMO USAR
       - Direta, SEM trava: é a impressora de verdade, para quando quiser
         imprimir sem limite. Vem como "<nome> - DIRETA".
 
-   3. CALOR MÁXIMO
+   3. CALOR E VELOCIDADE MÁXIMOS
       Arraste as barras. Quanto menor o número, menos calor.
+      A barra "Velocidade máxima" vem em 0 (não limita). Se o ribbon ainda
+      cortar ou a impressora fizer "tec tec tec", coloque em 3 e teste.
 
 3. Clique em "Instalar trava". Pronto.
    Fica um atalho "TravaCalor" na Área de Trabalho para abrir o painel depois.
@@ -41,9 +43,14 @@ Abra o painel, mexa no que quiser (calor, nomes, impressora) e clique em
 COMO SABER SE FUNCIONOU
 Imprima uma etiqueta e olhe o topo do painel:
   Faixa verde "TRAVA ATIVA"            -> a trava está ligada.
-  "calor REDUZIDO -> ~SD 30->15"       -> funcionou, o calor foi reduzido.
+  "calor CONTROLADO -> H 30->12"       -> funcionou, o calor foi reduzido.
+  "calor CONTROLADO -> H inserido=12"  -> o programa não mandava calor na
+                                          etiqueta (a impressora usava o que
+                                          tinha guardado); a trava agora manda
+                                          o limite em toda etiqueta.
   "calor já estava dentro do limite"   -> o programa não passou do limite.
-  "não mandou comando de calor"        -> veja "Se não funcionar" abaixo.
+  "não mandou comando de calor"        -> linguagem não reconhecida. Veja
+                                          "Se não funcionar" abaixo.
   Faixa vermelha "PARADA"              -> clique em "Reiniciar trava".
 O botão "Abrir histórico" mostra todas as impressões.
 
